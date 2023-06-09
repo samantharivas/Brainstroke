@@ -161,36 +161,6 @@ t.v2 #data balanced to 30% yes and 70% no
 ```
 
 ```{r}
-# building pls model 
-set.seed(200)
-ctrlpls <- trainControl(method = "repeatedcv", repeats = 5)
-
-pls <- train(stroke~.,
-             data = train_rebalanced,
-             trControl = ctrlpls,
-             preProcess = c("center","scale"),
-             method = "pls",
-             tuneLength = 40)
-
-pls
-
-
-#elastic net model
-glmnetGrid <- expand.grid(lambda = c(0, 0.01, 0.1),
-                       alpha = seq(0, 1, length = 20))
-
-set.seed(100)
-glmnet <- train(stroke~., 
-              data = train_rebalanced,
-              method = "glmnet",
-              trControl = ctrlpls,
-              preProc = c("center", "scale"),
-              tuneGrid = glmnetGrid)
-glmnet
-
-```
-
-```{r}
 
 # defining Boosted Trees model
 set.seed(100)
