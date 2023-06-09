@@ -1,0 +1,260 @@
+---
+title: "ADS503 Finals Project"
+output: html_document
+date: "2023-05-31"
+---
+
+#EDA
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(corrplot)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(moments)
+library(Hmisc)
+library(pROC)
+library(caret)
+library(gbm)
+library(knitr)
+library(MASS)
+```
+
+```{r}
+getwd()
+setwd("/Users/samantharivas/Documents/groupproject/ADS503-Group-Project/Brainstroke")
+
+brain_stroke = read.csv("healthcare-dataset-stroke-data.csv")
+brain_stroke
+```
+
+```{r}
+#removing null values
+brain_na = brain_stroke[-which(brain_stroke$bmi=="N/A"), ]
+```
+
+```{r}
+#Types of data
+str(brain_stroke) #data consists of numeric, character,  and integer variables
+
+#Dimension of the data
+dim(brain_stroke) 
+```
+
+```{r}
+#Changing variables from character to factor to numeric
+brain_stroke_fac<- brain_na %>% mutate_if(is.character, as.factor)
+brain_stroke_num <- brain_stroke_fac %>% mutate_if(is.factor, as.numeric)
+
+head(brain_stroke_num, n = 5)
+str(brain_stroke_num) #dataset now consists of numeric and integer varaibles 
+```
+
+```{r}
+#identify outliers using boxplot
+par(mfrow = c(1, 3))
+for (i in 1:ncol(brain_stroke_num)) {boxplot(brain_stroke_num[ ,i], 
+                                             xlab = names(brain_stroke_num[i]),
+                                             main = paste(names(
+                                               brain_stroke_num[i]), "Boxplot"))
+  }
+
+```
+
+Our group decided to keep outlier variables as we considered them an important factor in predicting brainstrokes.
+
+```{r}
+#check for duplicates
+sum(duplicated(brain_stroke_num))
+```
+
+```{r}
+#running a correlation test to drop variables 
+correlation <- cor(brain_stroke_num)
+dim(correlation)
+corrplot(correlation, order = "hclust")
+correlation
+```
+
+Dropping variables that have a less than 0.05 correlation significance to the predictor variable "stroke".
+
+```{r}
+#dropping columns id, residence_typem gender, bmi 
+brain_drop=subset(brain_stroke_num, select=-c(id, Residence_type, gender, bmi))
+head(brain_drop, n =5)
+```
+
+```{r}
+#running a correlation test on the new df-brain_drop
+correlation_drop <- cor(brain_drop)
+dim(correlation_drop)
+corrplot(correlation_drop, order = "hclust")
+correlation_drop
+```
+
+```{r}
+#skewness
+skewness(brain_drop)
+```
+
+```{r}
+summary(brain_drop)
+```
+
+```{r}
+#histogram of the variables
+hist.data.frame(brain_drop)
+
+par(mfrow = c(1, 3))
+for (i in 1:ncol(brain_drop)) {hist(brain_drop[ ,i], 
+                                             xlab = names(brain_drop[i]),
+                                             main = paste(names(
+                                               brain_drop[i]), "Histogram"))
+  }
+
+#par(mfrow = c(2, 2))
+#hist(brain_drop$ever_married)
+#hist(brain_drop$hypertension)
+#hist(brain_drop$heart_disease)
+#hist(brain_drop$stroke)
+```
+
+```{r}
+df <- brain_drop
+
+df
+
+# convert stroke numeric values in to factor ( 0 = No, 1 = Yes )
+df$stroke <- ifelse(df$stroke == 0, "No","Yes")
+
+head(df, n = 5)
+
+#splitting the data set into test and train
+set.seed(100)
+inTrain <- createDataPartition(df$stroke, p = .80,list = FALSE)
+
+train <- df[inTrain, ]
+test <- df[-inTrain, ]
+
+
+#balancing the training dataset
+
+table(train$stroke) #4% of the training df is "yes"
+to.resample <- which(train$stroke == "Yes") 
+
+our.resample <- sample(x = to.resample, size = 1443, replace = TRUE) #resampling data to 30% yes  
+
+our.resample <- train[our.resample, ]
+
+train_rebalanced <- rbind(train, our.resample)
+
+t.v1 <- table(train_rebalanced$stroke)
+t.v2 <- rbind(t.v1, round(prop.table(t.v1), 4))
+colnames(t.v2) <- c( "Stroke = No", "Stroke = Yes"); 
+rownames(t.v2) <- c("Count", "Proportion")
+t.v2 #data balanced to 30% yes and 70% no 
+
+```
+
+```{r}
+# building pls model 
+set.seed(200)
+ctrlpls <- trainControl(method = "repeatedcv", repeats = 5)
+
+pls <- train(stroke~.,
+             data = train_rebalanced,
+             trControl = ctrlpls,
+             preProcess = c("center","scale"),
+             method = "pls",
+             tuneLength = 40)
+
+pls
+
+
+#elastic net model
+glmnetGrid <- expand.grid(lambda = c(0, 0.01, 0.1),
+                       alpha = seq(0, 1, length = 20))
+
+set.seed(100)
+glmnet <- train(stroke~., 
+              data = train_rebalanced,
+              method = "glmnet",
+              trControl = ctrlpls,
+              preProc = c("center", "scale"),
+              tuneGrid = glmnetGrid)
+glmnet
+
+```
+
+```{r}
+
+# defining Boosted Trees model
+set.seed(100)
+
+gbm.Grid <- expand.grid(.interaction.depth = seq(1, 3, 5),
+                       .n.trees = seq(100, 1000, by = 100), 
+                       .shrinkage = c(0.01, 0.1), 
+                       .n.minobsinnode = seq(5, 10, 15))
+
+
+stroke_gbm <- train(stroke~., 
+                    data = train_rebalanced, 
+                    method = "gbm", 
+                    tuneGrid = gbm.Grid,
+                    verbose = FALSE)
+
+stroke_gbm$finalModel
+
+plot(stroke_gbm, main = "Boosted Trees Model")
+
+#re-sampling Boosted trees model
+gbmResample <-stroke_gbm$results
+gbmResample$Model <-"gbm"
+head(gbmResample)
+
+#finding most important predictors 
+gbmImp <- varImp(stroke_gbm, scale = FALSE)
+
+gbmImp
+
+plot(gbmImp, 
+     main = "Variable Importance for Boosted Trees Model")
+# from the graph we can conclude age is the most important variable
+# avg_glucose_level and hypertension are also important 
+
+
+#defining levels of test$stroke to build confusion matrix + ROC 
+test$stroke <- factor(test$stroke, levels = c("Yes", "No"))
+               
+levels(test$stroke)
+
+# running predictions on the test data 
+gbm_prediction <- predict(stroke_gbm, newdata = test)
+gbm_prediction_prob <- predict(stroke_gbm, 
+                               newdata = test, 
+                               type = "prob") 
+
+test$gbmclass <- predict(stroke_gbm, test)
+test$gbmprob <- gbm_prediction_prob[, "No"]
+
+# creating a confusion matrix for Predicted No/Yes and Actual No/Yes
+gbm_confusionMatrix <- confusionMatrix(data = gbm_prediction, 
+                                       reference = test$stroke,
+                                       positive = "No")
+
+gbm_confusionMatrix
+
+#ROC
+gbm_roc <- roc(response = test$stroke, 
+               predictor = test$gbmprob, 
+               levels = rev(levels(test$stroke)))
+
+plot(gbm_roc)
+
+```
+
+
