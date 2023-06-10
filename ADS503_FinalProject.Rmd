@@ -227,4 +227,51 @@ plot(gbm_roc)
 
 ```
 
+```{r}
+# Finding the optimal number of variables to use in Randomforest model
+errorvalues <- vector()
+for (i in 3:10){
+  temprf <- randomForest(as.factor(stroke)~.,data = train_rebalanced, ntree = 1000, mtry = i)
+  errorvalues[i] <- temprf$err.rate[nrow(temprf$err.rate),1]
+}
 
+plot(errorvalues)
+
+# Creating Randomforest model
+set.seed(100)
+rfTune <- randomForest(as.factor(stroke)~., data = train_rebalanced, ntree = 1000, mtry = 5,
+                       trControl = trainControl(method = "cv"), preProc = c("center", "scale"))
+rfTune
+
+# Defining levels of response variable
+test$stroke <- factor(test$stroke, levels = c("Yes", "No"))
+               
+levels(test$stroke)
+
+# Creating predictions on test data for Randomforest model
+rf_prediction <- predict(rfTune, newdata = test)
+rf_prediction_prob <- predict(rfTune, 
+                               newdata = test, 
+                               type = "prob") 
+
+test$rfclass <- predict(rfTune, test)
+test$rfprob <- rf_prediction_prob[, "No"]
+
+# Confusion matrix for Randomforest model
+rf_pred <- predict(rfTune, newdata = test[,-8])
+rf_cm <- confusionMatrix(rf_pred, as.factor(test$stroke))
+rf_cm
+
+# Variable importance for Randomforest
+rfImp <- varImp(rfTune, scale = TRUE)
+rfImp
+
+# Plot variable importance
+plot(rfImp)
+
+# ROC curve for Randomforest model
+rf_roc <- roc(response = test$stroke, predictor = test$rfprob, levels = rev(levels(test$stroke)))
+
+# Plot ROC curve for Randomforest model
+plot(rf_roc)
+```
