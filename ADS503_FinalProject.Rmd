@@ -3,6 +3,7 @@ title: "ADS503 Finals Project"
 output: html_document
 date: "2023-05-31"
 ---
+## Data obtained from Kaggle: https://www.kaggle.com/datasets/zzettrkalpakbal/full-filled-brain-stroke-dataset
 
 #EDA
 
@@ -10,7 +11,7 @@ date: "2023-05-31"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, reuslts = "hide"}
 library(corrplot)
 library(readr)
 library(dplyr)
@@ -21,6 +22,7 @@ library(pROC)
 library(caret)
 library(gbm)
 library(knitr)
+library(randomForest)
 library(MASS)
 ```
 
@@ -115,12 +117,6 @@ for (i in 1:ncol(brain_drop)) {hist(brain_drop[ ,i],
                                              main = paste(names(
                                                brain_drop[i]), "Histogram"))
   }
-
-#par(mfrow = c(2, 2))
-#hist(brain_drop$ever_married)
-#hist(brain_drop$hypertension)
-#hist(brain_drop$heart_disease)
-#hist(brain_drop$stroke)
 ```
 
 ```{r}
@@ -161,7 +157,6 @@ t.v2 #data balanced to 30% yes and 70% no
 ```
 
 ```{r}
-
 # defining Boosted Trees model
 set.seed(100)
 
@@ -202,7 +197,7 @@ test$stroke <- factor(test$stroke, levels = c("Yes", "No"))
                
 levels(test$stroke)
 
-# running predictions on the test data 
+# running predictions on the test data for Boosted Trees model 
 gbm_prediction <- predict(stroke_gbm, newdata = test)
 gbm_prediction_prob <- predict(stroke_gbm, 
                                newdata = test, 
@@ -275,3 +270,87 @@ rf_roc <- roc(response = test$stroke, predictor = test$rfprob, levels = rev(leve
 # Plot ROC curve for Randomforest model
 plot(rf_roc)
 ```
+
+```{r}
+# Partial Least Squares model 
+set.seed(200)
+preProc <- preProcess(train, method = c("center", "scale"))
+ctrlpls <- trainControl(method="repeatedcv", repeats=5)
+
+#pls model
+pls <- train(stroke~., data = train_rebalanced, 
+             method="pls", 
+             ctrlpls=trainControl, 
+             preProcess=c("center", "scale"), 
+             tuneLength=20)
+pls
+
+plot(pls)
+
+# Defining levels of stroke 
+test$stroke=factor(test$stroke, levels=c("Yes", "No"))
+levels(test$stroke)
+
+# Creating predictions on the test data for PLS model
+pls_pred <- predict(pls, 
+                    newdata = test[,-8])
+
+pls_prob <- predict(pls,
+                    newdata = test[,-8], 
+                    type = "prob")
+
+test$plsclass <- predict(pls, test)
+test$pls_prob <- pls_prob[,"No"]
+
+# Confusion matrix for PLS
+pls_cm <- confusionMatrix(as.factor(test$stroke), pls_pred)
+pls_cm
+
+# ROC for PLS 
+pls_roc <- roc(response = test$stroke, 
+               predictor = test$pls_prob, 
+               levels = rev(levels(test$stroke)))
+plot(pls_roc)
+
+# Variable importance for PLS 
+varImppls <- varImp(pls)
+varImppls
+
+plot(varImppls)
+
+```
+```{r}
+# Variable importance for all three models 
+par(mfrow = c(1, 3))
+plot(gbmImp, 
+     main = "Variable Importance for Boosted Trees")
+
+plot(rfImp, 
+     main = "Variable Importance for Random Forest")
+
+plot(varImppls, 
+     main = "Variable Importance for Partial Least Squares")
+```
+```{r}
+# combine the three ROC curves into a data frame
+roc_curves <- data.frame(
+  Model = c(rep("GBM", length(gbm_roc$specificities)),
+            rep("RF", length(rf_roc$specificities)),
+            rep("PLS", length(pls_roc$specificities))),
+  Specificity = c(gbm_roc$specificities,
+                  rf_roc$specificities,
+                  pls_roc$specificities),
+  Sensitivity = c(gbm_roc$sensitivities,
+                  rf_roc$sensitivities,
+                  pls_roc$sensitivities)
+)
+
+# plot the ROC curves 
+ggplot(roc_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) +
+  geom_line() +
+  labs(x = "False Positive Rate (1 - Specificity)", y = "True Positive Rate (Sensitivity)",
+       title = "ROC Curves") +
+  theme_minimal()
+
+```
+
