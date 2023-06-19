@@ -3,11 +3,11 @@ title: "Brainstroke Predictive Modeling"
 output:
   pdf_document: default
   html_document: default
-date: "2023-05-31"
+date: "June 26th, 2023"
 ---
 ## Data obtained from Kaggle: https://www.kaggle.com/datasets/zzettrkalpakbal/full-filled-brain-stroke-dataset
 
-#EDA
+# EDA
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -26,6 +26,8 @@ library(gbm)
 library(knitr)
 library(randomForest)
 library(MASS)
+library(randomForestExplainer)
+library(lattice)
 ```
 
 ```{r}
@@ -59,8 +61,10 @@ str(brain_stroke_num) #dataset now consists of numeric and integer varaibles
 ```
 
 ```{r}
+# increase the size of the plot area
+par(mfrow = c(3,4)) 
+
 #identify outliers using boxplot
-par(mfrow = c(3, 4))
 for (i in 1:ncol(brain_stroke_num)) {boxplot(brain_stroke_num[ ,i], 
                                              xlab = names(brain_stroke_num[i]),
                                              main = paste(names(
@@ -157,7 +161,9 @@ rownames(t.v2) <- c("Count", "Proportion")
 t.v2 #data balanced to 30% yes and 70% no 
 
 ```
+# Model Building Strategies 
 
+## Boosted Trees Model 
 ```{r}
 # defining Boosted Trees model
 set.seed(100)
@@ -222,13 +228,22 @@ gbm_roc <- roc(response = test$stroke,
 
 plot(gbm_roc, main = "Boosted Trees ROC")
 
-```
+# calculate the AUC 
+gbmroc_score <- auc(gbm_roc)
 
+# print the AUC 
+print(gbmroc_score)
+
+
+```
+## Random Forest Model
 ```{r}
 # Finding the optimal number of variables to use in Randomforest model
 errorvalues <- vector()
 for (i in 3:10){
-  temprf <- randomForest(as.factor(stroke)~.,data = train_rebalanced, ntree = 1000, mtry = i)
+  temprf <- randomForest(as.factor(stroke)~.,
+                         data = train_rebalanced, 
+                         ntree = 1000, mtry = i)
   errorvalues[i] <- temprf$err.rate[nrow(temprf$err.rate),1]
 }
 
@@ -236,8 +251,11 @@ plot(errorvalues, main = "Error Values")
 
 # Creating Randomforest model
 set.seed(100)
-rfTune <- randomForest(as.factor(stroke)~., data = train_rebalanced, ntree = 1000, mtry = 5,
-                       trControl = trainControl(method = "cv"), preProc = c("center", "scale"))
+rfTune <- randomForest(as.factor(stroke)~., 
+                       data = train_rebalanced, 
+                       ntree = 1000, mtry = 5,
+                       trControl = trainControl(method = "cv"), 
+                       preProc = c("center", "scale"))
 rfTune
 
 # Defining levels of response variable
@@ -259,20 +277,42 @@ rf_pred <- predict(rfTune, newdata = test[,-8])
 rf_cm <- confusionMatrix(rf_pred, as.factor(test$stroke))
 rf_cm
 
-# Variable importance for Randomforest
-rfImp <- varImp(rfTune, scale = TRUE)
+# Variable importance values for Random Forest
+var_importance <- rfTune$importance[, "MeanDecreaseGini"]
+
+# Sort variable importance values in descending order
+sorted_indices <- order(var_importance)
+sorted_importance <- var_importance[sorted_indices]
+sorted_names <- names(var_importance)[sorted_indices]
+
+# Plot Variable Importance
+rfImp <-dotplot(sorted_names ~ sorted_importance, pch = 19,
+                main = "Variable Importance for Random Forest Model",
+                xlab = "Importance", ylab = "",
+                type = c("p", "h"), panel.grid = "none")
 rfImp
 
+# Variable importance for Randomforest
+#rfImp <- varImp(rfTune, scale = TRUE)
+#rfImp
+
 # Plot variable importance
-plot(rfImp, main = "Variable Importance for Random Forest Model")
+#plot(rfImp, main = "Variable Importance for Random Forest Model")
 
 # ROC curve for Randomforest model
-rf_roc <- roc(response = test$stroke, predictor = test$rfprob, levels = rev(levels(test$stroke)))
+rf_roc <- roc(response = test$stroke, predictor = test$rfprob, 
+              levels = rev(levels(test$stroke)))
 
 # Plot ROC curve for Randomforest model
 plot(rf_roc, main = "Random Forest ROC")
-```
 
+# Calculate the AUC 
+rfroc_score <- auc(rf_roc)
+
+# Print the AUC (ROC score)
+print(rfroc_score)
+```
+## Partial Least Squares Model
 ```{r}
 # Partial Least Squares model 
 set.seed(200)
@@ -314,6 +354,12 @@ pls_roc <- roc(response = test$stroke,
                levels = rev(levels(test$stroke)))
 plot(pls_roc, main = "Partial Least Squares ROC")
 
+# calculate the AUC 
+plsroc_score <- auc(pls_roc)
+
+# print the AUC 
+print(plsroc_score)
+
 # Variable importance for PLS 
 varImppls <- varImp(pls)
 varImppls
@@ -321,20 +367,28 @@ varImppls
 plot(varImppls, main = "Variable Importance for Partial Least Squares Model")
 
 ```
+
+## Final Results 
 ```{r}
 # Variable importance for all three models 
-par(mfrow = c(1, 3))
+par(mfrow = c(2, 2))
 plot(gbmImp, 
      main = "Variable Importance for Boosted Trees")
+
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
 
 plot(rfImp, 
      main = "Variable Importance for Random Forest")
 
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+
 plot(varImppls, 
      main = "Variable Importance for Partial Least Squares")
+par(mfrow = c(1, 1))
 ```
 ```{r}
-
 # combine the three ROC curves into a data frame
 roc_curves <- data.frame(
   Model = c(rep("GBM", length(gbm_roc$specificities)),
@@ -356,4 +410,4 @@ ggplot(roc_curves, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) +
   theme_minimal()
 
 ```
-
+Our group has selected the Random Forest model as our optimal model. 
